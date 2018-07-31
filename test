@@ -1,0 +1,248 @@
+Option Explicit
+Sub AllocateToWorksheet()
+      'USAGE INSTRUCTIONS
+      ' 1. Adjust offset value of assignment accordingly
+      ' 2. Ranges should just be one column
+      ' 3. It skips duplicate finds
+      '
+      '
+           
+      Dim Assignment As String, AllocationItems As Range, AllocationItemColumn As Long, ItemToSearch As String, TargetCell As Range
+      Dim SourceUniqueId As Range, AssignmentColumn As Variant, WhereToSearch As Range
+      Dim HeaderRow As Range, nm, SourceHeaderRow, Cell, AllocationItem, SourceCommentCol, SourceCommentCell
+      Dim FirstAddress, ErrSheet, LastEmptyRow, DestCommentCol
+
+      For Each nm In ActiveWorkbook.Names
+      If nm.Name = "WhereToSearch" Then
+      nm.Delete
+      ElseIf nm.Name = "HeaderRow" Then
+      nm.Delete
+      ElseIf nm.Name = "AllocationItems" Then
+      nm.Delete
+      ElseIf nm.Name = "SourceUniqueId" Then
+      nm.Delete
+      ElseIf nm.Name = "SourceHeaderRow" Then
+      nm.Delete
+      
+      End If
+      Next
+      
+      
+      'SELECTING WORKING RANGES
+      Set SourceUniqueId = Application.InputBox(Title:="Select Range", prompt:="Select Range Containing Allocation Criteria Items ", Type:=8)
+          SourceUniqueId.Parent.Activate
+          Worksheets(SourceUniqueId.Parent.Name).Range(SourceUniqueId.Address).Name = "SourceUniqueId"
+          
+      Set SourceHeaderRow = SourceUniqueId.Cells(1).CurrentRegion.Rows(1) 'Defining Header Row of Source data
+          Worksheets(SourceUniqueId.Parent.Name).Range(SourceHeaderRow.Address).Name = "SourceHeaderRow"
+          
+      Set AllocationItems = Application.InputBox(Title:="Select Range", prompt:="Select the items to be allocated" & vbNewLine & "These are the items to be transferred", Type:=8)
+          AllocationItems.Parent.Activate
+          Worksheets(AllocationItems.Parent.Name).Range(AllocationItems.Address).Name = "AllocationItems"
+      
+      Set HeaderRow = Application.InputBox(Title:="Select Range", prompt:="Select The Row that Contains The Headers In The Range Where you are allocating" & vbNewLine, Type:=8)
+            Worksheets(HeaderRow.Parent.Name).Activate
+            Worksheets(HeaderRow.Parent.Name).Range(HeaderRow.Address).Name = "HeaderRow"
+    
+ 
+      Set WhereToSearch = Application.InputBox(Title:="Select Range", prompt:="Select Where to Search the Unique ID" & vbNewLine, Type:=8)
+            Worksheets(WhereToSearch.Parent.Name).Activate
+            Worksheets(WhereToSearch.Parent.Name).Range(WhereToSearch.Address).Name = "WhereToSearch"
+            
+
+        Application.ScreenUpdating = False
+        
+        
+        For Each Cell In Range("SourceUniqueId").SpecialCells(xlCellTypeVisible)
+                Range("SourceUniqueId").Parent.Activate
+                ItemToSearch = Cell.Value
+                AllocationItem = Cells(Cell.Row, Range("AllocationItems").Column).Formula
+                Assignment = Cell.Offset(0, 1).Value                 '++Make this dynamic++
+                
+                'DEFINING SOURCE AND DESTINATION COMMENT CELLS
+                On Error Resume Next
+                SourceCommentCol = Sheets("Stmnt").Range("SourceHeaderRow").Find("Comment").Column        'Finding comment column number
+                On Error GoTo 0
+                SourceCommentCell = Cells(Cell.Row, SourceCommentCol)
+                'MsgBox SourceCommentCell.Address
+                
+                
+                    
+                Range("WhereToSearch").Parent.Activate
+                On Error Resume Next
+                Set AssignmentColumn = Range("HeaderRow").Find(what:=Assignment, LookIn:=xlFormulas, lookat:=xlWhole)
+                AssignmentColumn = AssignmentColumn.Column
+                On Error GoTo 0
+                  
+                If AllocationItem = "" Then GoTo NextCycle 'Go to next cycle if allocation item is blank
+                If AllocationItem Like ("=*") Then AllocationItem = Replace(AllocationItem, "=", "") 'Remove = sign if it exists
+        
+           '===================================================================================
+                         
+            'FIND TARGET CELL CONTAINING THE UNIQUE ID[BD NO.]
+                    
+                    On Error Resume Next
+                    Set TargetCell = Range("WhereToSearch").Find(what:=ItemToSearch, LookIn:=xlValues, lookat:=xlWhole)
+                    FirstAddress = TargetCell.Address
+                    On Error GoTo 0
+                    
+                    If TargetCell Is Nothing Then
+                        GoTo CAPTURE_ERRORS:
+                        GoTo NextCycle
+                        ElseIf Not TargetCell Is Nothing Then
+                        
+                        
+                '========================================================================================
+                        'CHECK IF THERE ARE DUPLICATE FINDS
+                        Set TargetCell = Range("WhereToSearch").FindNext(TargetCell)
+                        If TargetCell.Address = FirstAddress Then GoTo Allocate 'CHECK THIS LINE IN ORDER TO CAPTURE THOSE WHOSE AMOUNTS DON'T MATCH
+                        
+                        Set TargetCell = Range("WhereToSearch").Find(what:=ItemToSearch, LookIn:=xlValues, lookat:=xlWhole) 'repeating find so that the findnext truly finds next not the first(just the way findnext works for non duplicates)
+                         
+                        Do
+                            Set TargetCell = Range("WhereToSearch").FindNext(TargetCell)
+                            If TargetCell.Offset(0, 5).Value = Val(AllocationItem) Then GoTo Allocate
+                                
+                                'CAPTURE THE MISSING ITEMS
+                                 If TargetCell.Address = FirstAddress Then
+CAPTURE_ERRORS:
+                                On Error Resume Next
+                                Set ErrSheet = Sheets("Errors")
+                                    If ErrSheet Is Nothing Then
+                                    On Error GoTo 0
+                                    Set ErrSheet = Worksheets.Add(before:=Sheets(1))
+                                    ErrSheet.Name = "Errors"
+                                    End If
+                                    
+                                ErrSheet.Range("A1") = "Items Missing"
+                                LastEmptyRow = ErrSheet.Range("A1").CurrentRegion.Rows.Count + 1
+                                ErrSheet.Cells(LastEmptyRow, 1) = ItemToSearch
+                                GoTo NextCycle
+                                End If
+                        Loop Until TargetCell.Offset(0, 5).Value = Val(AllocationItem)  'Loops until doc amount matches the allocation amount
+                         
+                         
+                                    '=============================================================================================
+                                    'ACTIVATE THE RELEVANT ALLOCATION COLUMNS AND ALLOCATE
+Allocate:
+                                    Range("WhereToSearch").Parent.Activate
+                                    TargetCell.Activate
+                                    Cells(ActiveCell.Row, AssignmentColumn).Activate
+                                        
+                                                If ActiveCell = "" Then                         'If blank then insert AllocationItem
+                                                ActiveCell.Value = "=" & AllocationItem
+                                                ElseIf ActiveCell <> "" Then                    'If not blank then check if it has only                                         'If not blank, then it's either with or without = sign
+                                                    If ActiveCell.Formula Like "=*" Then       'One figure without "=" sign if so then
+                                                    ActiveCell.Value = ActiveCell.Formula & "+" & AllocationItem              ' Insert "=" sign and AllocationItem
+                                                    Else: ActiveCell.Value = "=" & ActiveCell.Formula & "+" & AllocationItem  '
+                                                    End If
+                                            
+                                                End If
+                                                
+                                    'DEFINING DESTINATION COMMENT CELLS
+                                    On Error Resume Next
+                                    DestCommentCol = Sheets("SAP").ListObjects("SapWsheet").HeaderRowRange.Find("Comment").Column      'Finding comment column number
+                                    On Error GoTo 0
+                                    Cells(TargetCell.Row, DestCommentCol).Value = SourceCommentCell     'Transfer Comment
+                                    
+                                
+                                
+                    End If
+                
+                Range("WhereToSearch").Parent.Activate
+                
+NextCycle:
+          Next Cell
+        
+          
+      '======================================================================================
+        'DELETE THE NAMED RANGES
+        For Each nm In ActiveWorkbook.Names
+            If nm.Name = "WhereToSearch" Then
+                nm.Delete
+                ElseIf nm.Name = "HeaderRow" Then
+                nm.Delete
+                ElseIf nm.Name = "AllocationItems" Then
+                nm.Delete
+                ElseIf nm.Name = "SourceUniqueId" Then
+                nm.Delete
+                ElseIf nm.Name = "SourceHeaderRow" Then
+                nm.Delete
+                
+            End If
+        Next nm
+
+    Application.ScreenUpdating = True
+    MsgBox "Done", vbInformation
+    
+End Sub
+
+Sub SelectingTableParts()
+
+ActiveSheet.ListObjects("OtherMOP").Range.Activate          'whole
+ActiveSheet.ListObjects("OtherMOP").DataBodyRange.Activate  'Data
+ActiveSheet.ListObjects("OtherMOP").HeaderRowRange.Activate 'Headers
+
+End Sub
+
+
+
+
+
+Sub AllocateBankTxn()
+        
+'*********************************************************************************
+        'COPY DOC NUM AND CHOOSE TX IN STMNT
+        Application.enableevents = False
+        Dim PasteCell As String
+        
+            On Error Resume Next
+            PasteCell = Application.InputBox(prompt:="Choose the Cell To Paste the Document Number", Title:="Range Selection", Type:=8, Default:=ActiveCell.Address).Address
+            If PasteCell = vbNullString Then
+            MsgBox "Cancelled"
+            GoTo Exiter
+            ElseIf Len(PasteCell) = 0 Then
+            MsgBox "Nothing Entered"
+            Exit Sub
+            On Error GoTo 0
+            End If
+                
+        If Sheets("Stmnt").Range(PasteCell) = "" Then
+            Range(PasteCell) = Range("StmntCurrentDoc")
+                '*****CHECK IF THE THE DIFF IS ZERO************************
+                Dim DiffCol, CommentCol
+                
+                 DiffCol = Cells(Range(PasteCell).Row, Range("StatementSCB[[#Headers],[Diff]]").Column).Address
+                 CommentCol = Cells(Range(PasteCell).Row, Range("StatementSCB[[#Headers],[Comment]]").Column).Address
+                    If Range(DiffCol) <> 0 Then
+                        Range(CommentCol).Activate
+                        Application.enableevents = True
+                        Exit Sub
+                    End If
+                
+            Else: MsgBox "Cell Selected is Not Blank!", vbCritical
+            GoTo Exiter
+        End If
+                
+        Range("StmntCurrentDoc").Activate
+        Range("StmntCurrentDoc") = "0" & Range("StmntCurrentDoc") + Range("Factor")
+        ActiveCell.Copy Destination:=Range("StmntCurrentDoc")
+        
+        
+Exiter:
+        Range("StmntCurrentDoc").Activate
+        Application.enableevents = True
+
+
+End Sub
+
+Sub enableevents()
+Application.enableevents = True
+
+End Sub
+
+Sub SK()
+    Rng = Range("StatementSCB[[#Headers],[Comment]]").Column
+    Debug.Print Rng
+End Sub
+
